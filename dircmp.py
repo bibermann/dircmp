@@ -268,7 +268,7 @@ def rewritePaths( directory, oldRootLen, newRoot ):
         fileId['path'] = newRoot + fileId['path'][oldRootLen:]
         rewritePaths( fileId['children'], oldRootLen, newRoot )
 
-def scan( rootGiven, rewriteRoot, name, skipScan, exclude, include, args ):
+def scan( rootGiven, rewriteRoot, name, saveAs, skipScan, exclude, include, args ):
     root = os.path.abspath( rootGiven.replace( '\\', '/' ) )
     if rewriteRoot:
         rootRewritten = os.path.abspath( rewriteRoot.replace( '\\', '/' ) )
@@ -276,7 +276,7 @@ def scan( rootGiven, rewriteRoot, name, skipScan, exclude, include, args ):
     if os.path.isdir( root ):
         print( "scanning %s..." % name )
         directory = scanIntoMemory( root, skipScan )
-        with open( args.save_left, 'w' ) as outfile:
+        with open( saveAs, 'w' ) as outfile:
             json.dump( directory, outfile, indent = 4 )
     else:
         print( "loading %s..." % name )
@@ -316,13 +316,13 @@ def main():
     parser.add_argument( '--ignore-modified', action = 'store_true' )
     parser.add_argument( '--partners-only', action = 'store_true' )
     parser.add_argument( '--singles-only', action = 'store_true' )
-    parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only affects fresh scans' )
-    parser.add_argument( '--save-left', default = 'subjects.json', help = 'only affects fresh scans' )
-    parser.add_argument( '--save-right', default = 'targets.json', help = 'only affects fresh scans' )
+    parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only affects directory scans' )
+    parser.add_argument( '--save-left', default = 'subjects.json', help = 'only affects directory scans' )
+    parser.add_argument( '--save-right', default = 'targets.json', help = 'only affects directory scans' )
     parser.add_argument( '--exclude', action = 'append', help = 'exclude paths (regex match)' )
     parser.add_argument( '--include', action = 'append', help = 'include paths only (regex match)' )
-    parser.add_argument( '--rewrite-left', help = 'rewrite left root directory' )
-    parser.add_argument( '--rewrite-right', help = 'rewrite right root directory' )
+    parser.add_argument( '--rewrite-left', help = 'rewrite left root directory for comparison' )
+    parser.add_argument( '--rewrite-right', help = 'rewrite right root directory for comparison' )
     args = parser.parse_args()
 
     if args.skip:
@@ -341,11 +341,11 @@ def main():
         include = []
 
     (leftDirectory, leftIndex, leftCommonRootLen) = scan( 
-        args.left, args.rewrite_left, 'subjects', skipScan, exclude, include, args
+        args.left, args.rewrite_left, 'subjects', args.save_left, skipScan, exclude, include, args
         )
 
     (rightDirectory, rightIndex, rightCommonRootLen) = scan( 
-        args.right, args.rewrite_right, 'targets', skipScan, exclude, include, args
+        args.right, args.rewrite_right, 'targets', args.save_right, skipScan, exclude, include, args
         )
 
     if args.mode == 'dirs':
