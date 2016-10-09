@@ -4,6 +4,7 @@ import os
 import argparse
 import json
 import sys
+import re
 
 def indexDirectory( directory ):
     index = {}
@@ -24,6 +25,7 @@ def printIndexResult( index ):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument( 'path', help = 'json file' )
+    parser.add_argument( '--find', help = 'find paths (regex match)' )
     args = parser.parse_args()
 
     root = os.path.abspath( args.path.replace( '\\', '/' ) )
@@ -42,6 +44,19 @@ def main():
     commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
 
     print( 'root: %s' % firstEntry['path'][:commonRootLen-1] )
+
+    if args.find:
+        print( "searching %s..." % args.find )
+        regex = re.compile( args.find )
+        findings = []
+        for path in index:
+            fileId = index[path]
+            if regex.search( fileId['path'] ):
+                findings.append( fileId )
+        findings = sorted( findings, key = lambda s: s['path'].lower() )
+        print( "results:" )
+        for finding in findings:
+            print( finding['path'][commonRootLen:] + ('/' if finding['isDir'] else '') )
 
 if __name__ == "__main__":
     main()
