@@ -8,6 +8,9 @@ import argparse
 import json
 import re
 import enum
+import sys
+import cPickle as pickle
+import hashlib
 
 class TagValue(enum.Enum):
     none = 1
@@ -15,11 +18,23 @@ class TagValue(enum.Enum):
     allFalse = 3
     conflict = 4
 
+def hashFileId( fileId, ignoreModified ):
+    if ignoreModified:
+        return [hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size']) ) ).hexdigest()]
+    else:
+        # +- 10 seconds
+        timestampBy10 = int(fileId['modified']/100.0)
+        return [
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10-1) ) ).hexdigest(),
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10+0) ) ).hexdigest(),
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10+1) ) ).hexdigest()
+            ]
+
 def compareFiles( a, b, ignoreModified ):
     if a['isDir'] != b['isDir']: return False
     if a['size'] != b['size']: return False
     if not ignoreModified:
-        if abs( a['modified'] - b['modified'] ) > 2: return False
+        if abs( a['modified'] - b['modified'] ) > 2*60: return False
     return True
 
 def haveSameItems( list1, list2, id = lambda x: x ):
@@ -88,6 +103,16 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
     printPartnersSimple( subjects, partners, leftCommonRootLen, rightCommonRootLen, args )
 
 def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, exclude, include, args ):
+    print( 'indexing targets...' )
+    rightFileIdIndex = {}
+    for rightPath in rightIndex:
+        rightFileId = rightIndex[rightPath]
+        targetHashes = hashFileId( rightFileId, args.ignore_modified )
+        for targetHash in targetHashes:
+            if not targetHash in rightFileIdIndex:
+                rightFileIdIndex[targetHash] = []
+            rightFileIdIndex[targetHash].append( rightFileId )
+
     print( 'searching file partners...' )
     lastOutput = time.time()
 
@@ -101,12 +126,19 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
     subjects = sorted( subjects, key = lambda s: s['path'].lower() )
     counter = 0
     for subject in subjects:
-        for rightPath in rightIndex:
-            if subject['path'] == rightPath:
-                continue
-            rightFileId = rightIndex[rightPath]
-            if compareFiles( subject, rightFileId, args.ignore_modified ):
-                partners.append( (subject, rightFileId) )
+        subjectHashes = hashFileId( subject, args.ignore_modified )
+        found = False
+        for subjectHash in subjectHashes:
+            if found: break
+            if subjectHash in rightFileIdIndex:
+                for potentialTarget in rightFileIdIndex[subjectHash]:
+                    if found: break
+                    if subject['path'] == potentialTarget['path']:
+                        continue
+                    if compareFiles( subject, potentialTarget, args.ignore_modified ):
+                        partners.append( (subject, potentialTarget) )
+                        found = True
+                        break
 
         counter += 1
         if time.time() - lastOutput > 10:
@@ -213,6 +245,20 @@ def rewritePaths( directory, oldRootLen, newRoot ):
         fileId['path'] = newRoot + fileId['path'][oldRootLen:]
         rewritePaths( fileId['children'], oldRootLen, newRoot )
 
+def filterDirectory( include, exclude, directory ):
+    newDirectory = {}
+    for name in directory:
+        fileId = directory[name]
+        if not checkFilter( exclude, include, fileId['path'] ):
+            continue
+        newDirectory[name] = {}
+        for key in fileId:
+            if key == 'children':
+                newDirectory[name][key] = filterDirectory( include, exclude, fileId[key] )
+            else:
+                newDirectory[name][key] = fileId[key]
+    return newDirectory
+
 def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exclude, args ):
     root = os.path.abspath( rootGiven.replace( '\\', '/' ) )
     if rewriteRoot:
@@ -228,6 +274,13 @@ def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exc
         with open( root, 'r' ) as infile:
             directory = json.load( infile )
 
+    if exclude or include:
+        print( 'filtering data...' )
+        directory = filterDirectory( include, exclude, directory )
+        if not directory:
+            print( "Error: root filtered out." )
+            sys.exit( 1 )
+
     if rewriteRoot:
         firstEntry = directory[list(directory.keys())[0]]
         commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
@@ -240,18 +293,9 @@ def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exc
     index = dircmp_info.indexDirectory( directory )
     dircmp_info.printIndexResult( index )
 
-    if exclude or include:
-        print( 'filtering indices...' )
-        filteredIndex = {}
-        for path in index:
-            if checkFilter( exclude, include, index[path]['path'] ):
-                filteredIndex[path] = index[path]
-    else:
-        filteredIndex = index
-
     print( '%s root: %s' % (name, firstEntry['path'][:commonRootLen-1]) )
 
-    return directory, filteredIndex, commonRootLen
+    return directory, index, commonRootLen
 
 def main():
     parser = argparse.ArgumentParser()
