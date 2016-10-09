@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 
+import dircmp_scan
+import dircmp_info
 import os
-import stat
 import time
 import argparse
 import json
@@ -13,54 +14,6 @@ class TagValue(enum.Enum):
     allTrue = 2
     allFalse = 3
     conflict = 4
-
-def getFileId( root, filename ):
-    path = os.path.join( root, filename )
-    info = os.stat( path )
-    return {
-        'name' : filename,
-        'path' : path,
-        'isDir' : stat.S_ISDIR( info.st_mode ),
-        'modified' : info.st_mtime,
-        'size' : info.st_size
-        }
-
-def scanIntoMemory( root, skipScan ):
-    progress = {}
-    progress['lastOutput'] = time.time()
-    progress['counter'] = 0
-    return _scanIntoMemory( root, skipScan, progress )
-
-def _scanIntoMemory( root, skipScan, progress ):
-    directory = {}
-    try:
-        dirlist = os.listdir( root )
-    except OSError:
-        print( 'Could not access %s' % root )
-        return directory
-    for filename in os.listdir( root ):
-        fileId = getFileId( root, filename )
-        if fileId['path'] in skipScan:
-            continue
-        fileId['children'] = {}
-        if fileId['isDir']:
-            fileId['children'] = _scanIntoMemory( fileId['path'], skipScan, progress )
-        directory[filename] = fileId
-
-        progress['counter'] += 1
-        if( time.time() - progress['lastOutput'] > 10 ):
-            print( '%i...' % progress['counter'] )
-            progress['lastOutput'] = time.time()
-
-    return directory
-
-def indexDirectory( directory ):
-    index = {}
-    for filename in directory:
-        fileId = directory[filename]
-        index[fileId['path']] = fileId
-        index.update( indexDirectory( fileId['children'] ) )
-    return index
 
 def compareFiles( a, b, ignoreModified ):
     if a['isDir'] != b['isDir']: return False
@@ -128,7 +81,7 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
                     partners.append( (subject, rightFileId) )
                     
         counter += 1
-        if( time.time() - lastOutput > 10 ):
+        if time.time() - lastOutput > 10:
             print( '%i/%i...' % (counter, len(subjects)) )
             lastOutput = time.time()
 
@@ -156,7 +109,7 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
                 partners.append( (subject, rightFileId) )
 
         counter += 1
-        if( time.time() - lastOutput > 10 ):
+        if time.time() - lastOutput > 10:
             print( '%i/%i...' % (counter, len(subjects)) )
             lastOutput = time.time()
 
@@ -254,28 +207,20 @@ def printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftI
                 color_red, single['path'][leftCommonRootLen:] + ('/' if single['isDir'] else ''), color_end,
                 ) )
 
-def printIndexResult( index ):
-    print( '%i files (%f GiB) and %i folders (%i non-empty) found.' % (
-        sum( not index[s]['isDir'] for s in index ),
-        sum( index[s]['size'] for s in index )/1024.0/1024.0/1024.0,
-        sum( index[s]['isDir'] for s in index ),
-        sum( index[s]['isDir'] and bool( index[s]['children'] ) for s in index ),
-        ) )
-
 def rewritePaths( directory, oldRootLen, newRoot ):
     for filename in directory:
         fileId = directory[filename]
         fileId['path'] = newRoot + fileId['path'][oldRootLen:]
         rewritePaths( fileId['children'], oldRootLen, newRoot )
 
-def scan( rootGiven, rewriteRoot, name, saveAs, skipScan, exclude, include, args ):
+def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exclude, args ):
     root = os.path.abspath( rootGiven.replace( '\\', '/' ) )
     if rewriteRoot:
         rootRewritten = os.path.abspath( rewriteRoot.replace( '\\', '/' ) )
 
     if os.path.isdir( root ):
         print( "scanning %s..." % name )
-        directory = scanIntoMemory( root, skipScan )
+        directory = dircmp_scan.scanIntoMemory( root, onlyScan, skipScan )
         with open( saveAs, 'w' ) as outfile:
             json.dump( directory, outfile, indent = 4 )
     else:
@@ -292,8 +237,8 @@ def scan( rootGiven, rewriteRoot, name, saveAs, skipScan, exclude, include, args
     firstEntry = directory[list(directory.keys())[0]]
     commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
 
-    index = indexDirectory( directory )
-    printIndexResult( index )
+    index = dircmp_info.indexDirectory( directory )
+    dircmp_info.printIndexResult( index )
 
     if exclude or include:
         print( 'filtering indices...' )
@@ -306,7 +251,7 @@ def scan( rootGiven, rewriteRoot, name, saveAs, skipScan, exclude, include, args
 
     print( '%s root: %s' % (name, firstEntry['path'][:commonRootLen-1]) )
 
-    return (directory, filteredIndex, commonRootLen)
+    return directory, filteredIndex, commonRootLen
 
 def main():
     parser = argparse.ArgumentParser()
@@ -316,14 +261,20 @@ def main():
     parser.add_argument( '--ignore-modified', action = 'store_true' )
     parser.add_argument( '--partners-only', action = 'store_true' )
     parser.add_argument( '--singles-only', action = 'store_true' )
+    parser.add_argument( '--only', action = 'append', help = 'include paths (exact match); only affects directory scans' )
     parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only affects directory scans' )
-    parser.add_argument( '--save-left', default = 'subjects.json', help = 'only affects directory scans' )
-    parser.add_argument( '--save-right', default = 'targets.json', help = 'only affects directory scans' )
+    parser.add_argument( '--save-left', default = 'subjects.json', help = 'default: %(default)s; only affects directory scans' )
+    parser.add_argument( '--save-right', default = 'targets.json', help = 'default: %(default)s; only affects directory scans' )
     parser.add_argument( '--exclude', action = 'append', help = 'exclude paths (regex match)' )
     parser.add_argument( '--include', action = 'append', help = 'include paths only (regex match)' )
     parser.add_argument( '--rewrite-left', help = 'rewrite left root directory for comparison' )
     parser.add_argument( '--rewrite-right', help = 'rewrite right root directory for comparison' )
     args = parser.parse_args()
+
+    if args.only:
+        onlyScan = set( map( lambda x: os.path.abspath( x.replace( '\\', '/' ) ), args.only ) )
+    else:
+        onlyScan = set()
 
     if args.skip:
         skipScan = set( map( lambda x: os.path.abspath( x.replace( '\\', '/' ) ), args.skip ) )
@@ -341,11 +292,11 @@ def main():
         include = []
 
     (leftDirectory, leftIndex, leftCommonRootLen) = scan( 
-        args.left, args.rewrite_left, 'subjects', args.save_left, skipScan, exclude, include, args
+        args.left, args.rewrite_left, 'subjects', args.save_left, onlyScan, skipScan, include, exclude, args
         )
 
     (rightDirectory, rightIndex, rightCommonRootLen) = scan( 
-        args.right, args.rewrite_right, 'targets', args.save_right, skipScan, exclude, include, args
+        args.right, args.rewrite_right, 'targets', args.save_right, onlyScan, skipScan, include, exclude, args
         )
 
     if args.mode == 'dirs':
