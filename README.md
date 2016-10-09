@@ -20,6 +20,10 @@ Tries to match each file from the _left_ somewhere on the _right_.
 If entire directories match, they are listet instead of each containing file
 to emphasize the directory match.
 
+## helper scripts
+
+dircmp_scan.py and dircmp_info.py provide sub functionality from dircmp.py for convenience.
+
 ## Licence
 
-dircmp.py is released under the Boost Software License.
+dircmp.py, dircmp_scan.py and dircmp_info.py are released under the Boost Software License.
