@@ -4,6 +4,8 @@ import libdircmp
 import argparse
 import re
 import time
+import sys
+import json
 
 def find( pattern, directory, index, commonRootLen, args ):
     color_green = '\033[92m'
@@ -80,6 +82,33 @@ def find( pattern, directory, index, commonRootLen, args ):
     if size_all != size_files:
         print( "files only: %s%s%s" % (color_red, libdircmp.formatMemory( size_files ), color_end) )
 
+def hashAllFileContents( index, filename, sources ):
+    print( 'hashing file contents...' )
+    lastOutput = time.time()
+    lastSave = time.time()
+    totalFileCount = sum( not index[path]['isDir'] for path in index )
+    counter = 0
+    contentHashes = {}
+    for path in index:
+        fileId = index[path]
+        if not fileId['isDir']:
+            libdircmp.hashFileContents( fileId, sources, contentHashes )
+
+        counter += 1
+        if time.time() - lastOutput > 10: # each 10 sec
+            print( '%i/%i...' % (counter, totalFileCount) )
+            lastOutput = time.time()
+
+            if time.time() - lastSave > 60*30: # each 30 min
+                print( 'saving hashes so far...' )
+                with open( filename, 'w' ) as outfile:
+                    json.dump( contentHashes, outfile, indent = 4 )
+                lastSave = time.time()
+
+    print( 'saving hashes...' )
+    with open( filename, 'w' ) as outfile:
+        json.dump( contentHashes, outfile, indent = 4 )
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument( 'path', help = 'directory or json file' )
@@ -89,14 +118,27 @@ def main():
     parser.add_argument( '--save', help = 'only on directory scans' )
     parser.add_argument( '--exclude', action = 'append', help = 'exclude paths (regex match)' )
     parser.add_argument( '--include', action = 'append', help = 'include paths only (regex match)' )
+    parser.add_argument( '--hash', help = 'hash all files and save them here' )
+    parser.add_argument( '--source', action = 'append', help = 'data source for hashing, may be old::new' )
     args = parser.parse_args()
 
-    (directory, index, commonRootLen) = libdircmp.scan(
+    if args.find and args.hash:
+        print( "Error: --find and --hash are distinct operations." )
+        sys.exit( 1 )
+
+    if args.source and not args.hash:
+        print( "Error: --source works only with --contents." )
+        sys.exit( 1 )
+
+    (directory, index, commonRoot) = libdircmp.scan(
         args.path, None, '', args.save, args
         )
 
     if args.find:
-        find( args.find, directory, index, commonRootLen, args )
+        find( args.find, directory, index, len(commonRoot), args )
+    elif args.hash:
+        sources = libdircmp.getSources( args.source, commonRoot )
+        hashAllFileContents( index, args.hash, sources )
 
 if __name__ == "__main__":
     main()

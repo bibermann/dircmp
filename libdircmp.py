@@ -4,6 +4,7 @@ import time
 import json
 import sys
 import re
+import hashlib
 
 def calculateDirectorySizes( directory ):
     size = 0
@@ -70,6 +71,7 @@ def checkExcludeFilter( exclude, path ):
 def rewritePaths( directory, oldRootLen, newRoot ):
     for filename in directory:
         fileId = directory[filename]
+        fileId['oriPath'] = fileId['path']
         fileId['path'] = newRoot + fileId['path'][oldRootLen:]
         rewritePaths( fileId['children'], oldRootLen, newRoot )
 
@@ -93,6 +95,41 @@ def getFileId( root, filename ):
         'modified' : info.st_mtime,
         'size' : info.st_size
         }
+
+def getSources( patternList, commonRoot ):
+    if patternList is None:
+        return []
+    sources = []
+    rootSet = False
+    for source in patternList:
+        if '::' in source:
+            items = source.split( '::' )
+            assert len( items ) == 2
+            sources.append( (items[0], items[1]) )
+        else:
+            if rootSet:
+                print( "Error: you can only specifiy one new root; try to use pattern old:new." )
+                sys.exit( 1 )
+            sources.append( (commonRoot, source) )
+            rootSet = True
+    return sources
+
+def hashFileContents( fileId, sources, contentHashes ):
+    oriPath = fileId['path'] if not ('oriPath' in fileId) else fileId['oriPath']
+    if not oriPath in contentHashes:
+        hasher = hashlib.sha1()
+        path = fileId['path']
+        for old, new in sources:
+            if path[:len(old)] == old:
+                path = new + path[len(old):]
+                break
+        with open( path, 'rb' ) as f:
+            blocksize = 1024*1024*10
+            buf = f.read( blocksize )
+            while len( buf ) > 0:
+                hasher.update( buf )
+                buf = f.read( blocksize )
+        contentHashes[oriPath] = hasher.hexdigest()
 
 def isIncluded( fileId, includes ):
     if fileId['path'] in includes:
@@ -138,7 +175,7 @@ def scan( rootGiven, rewriteRoot, name, saveAs, args ):
 
     if not os.path.isdir( root ):
         if args.only or args.skip:
-            print( "Error: --only and --skip works only on directory scans." )
+            print( "Error: --only and --skip work only on directory scans." )
             sys.exit( 1 )
         if saveAs:
             print( "Error: scan results can only be saved of directory scans." )
@@ -164,8 +201,9 @@ def scan( rootGiven, rewriteRoot, name, saveAs, args ):
 
         print( "scanning %s..." % (name if name else root) )
         directory = scanIntoMemory( root, onlyScan, skipScan )
-        with open( saveAs, 'w' ) as outfile:
-            json.dump( directory, outfile, indent = 4 )
+        if saveAs:
+            with open( saveAs, 'w' ) as outfile:
+                json.dump( directory, outfile, indent = 4 )
     elif os.path.isfile( root ):
         print( "loading %s..." % (name if name else root) )
         with open( root, 'r' ) as infile:
@@ -196,19 +234,19 @@ def scan( rootGiven, rewriteRoot, name, saveAs, args ):
 
     if rewriteRoot:
         firstEntry = directory[list(directory.keys())[0]]
-        commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
+        commonRoot = firstEntry['path'][: len( firstEntry['path'] ) - len( firstEntry['name'] ) ]
 
-        rewritePaths( directory, commonRootLen-1, rootRewritten )
+        rewritePaths( directory, len(commonRoot)-1, rootRewritten )
 
     firstEntry = directory[list(directory.keys())[0]]
-    commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
+    commonRoot = firstEntry['path'][: len( firstEntry['path'] ) - len( firstEntry['name'] ) ]
 
     index = indexDirectory( directory )
     printIndexResult( index )
 
     if name:
-        print( '%s root: %s' % (name, firstEntry['path'][:commonRootLen-1]) )
+        print( '%s root: %s' % (name, firstEntry['path'][:len(commonRoot)-1]) )
     else:
-        print( 'root: %s' % firstEntry['path'][:commonRootLen-1] )
+        print( 'root: %s' % firstEntry['path'][:len(commonRoot)-1] )
 
-    return directory, index, commonRootLen
+    return directory, index, commonRoot

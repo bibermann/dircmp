@@ -4,6 +4,9 @@ import libdircmp
 import time
 import argparse
 import enum
+import sys
+import json
+import os
 import cPickle as pickle
 import hashlib
 
@@ -25,11 +28,20 @@ def hashFileId( fileId, ignoreModified ):
             hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestamp+1) ) ).hexdigest()
             ]
 
-def compareFiles( a, b, ignoreModified ):
+def getContentHash( fileId, contentHashes ):
+    oriPath = fileId['path'] if not ('oriPath' in fileId) else fileId['oriPath']
+    return contentHashes[oriPath]
+
+def compareFiles( a, b, ignoreModified, compareContents, leftSources, rightSources, leftContentHashes, rightContentHashes ):
     if a['isDir'] != b['isDir']: return False
     if a['size'] != b['size']: return False
     if not ignoreModified:
         if abs( a['modified'] - b['modified'] ) > 2*60: return False
+    assert not a['isDir'] and not b['isDir']
+    if compareContents:
+        libdircmp.hashFileContents( a, leftSources, leftContentHashes )
+        libdircmp.hashFileContents( b, rightSources, rightContentHashes )
+        if getContentHash( a, leftContentHashes ) != getContentHash( b, rightContentHashes ): return False
     return True
 
 def haveSameItems( list1, list2, id = lambda x: x ):
@@ -43,7 +55,7 @@ def haveSameItems( list1, list2, id = lambda x: x ):
         set2.add( id( item ) )
     return not (set1 ^ set2)
 
-def compareDirectories( a, b, ignoreModified ):
+def compareDirectories( a, b, ignoreModified, compareContents ):
     if a['size'] != b['size']:
         return False
 
@@ -64,7 +76,7 @@ def compareDirectories( a, b, ignoreModified ):
             if not compareDirectories( aId, bId, ignoreModified ):
                 return False
         else:
-            if not compareFiles( aId, bId, ignoreModified ):
+            if not compareFiles( aId, bId, ignoreModified, compareContents, [], [], {}, {} ):
                 return False
 
     return True
@@ -88,7 +100,7 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
                 continue
             rightFileId = rightIndex[rightPath]
             if rightFileId['isDir']:
-                if compareDirectories( subject, rightFileId, args.ignore_modified ):
+                if compareDirectories( subject, rightFileId, args.ignore_modified, args.contents ):
                     partners.append( (subject, rightFileId) )
 
         counter += 1
@@ -98,7 +110,18 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
 
     printPartnersSimple( subjects, partners, leftCommonRootLen, rightCommonRootLen, args )
 
-def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args ):
+def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, leftSources, rightSources, args ):
+    leftContentHashes = {}
+    rightContentHashes = {}
+    if args.hashfile_left and os.path.isfile( args.hashfile_left ):
+        print( 'loading subject hashes...' )
+        with open( args.hashfile_left, 'r' ) as infile:
+            leftContentHashes = json.load( infile )
+    if args.hashfile_right and os.path.isfile( args.hashfile_right ):
+        print( 'loading target hashes...' )
+        with open( args.hashfile_right, 'r' ) as infile:
+            rightContentHashes = json.load( infile )
+
     print( 'indexing targets...' )
     rightFileIdIndex = {}
     for rightPath in rightIndex:
@@ -111,6 +134,7 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
 
     print( 'searching file partners...' )
     lastOutput = time.time()
+    lastSave = time.time()
 
     subjects = []
     for leftPath in leftIndex:
@@ -130,7 +154,7 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
                 for potentialTarget in rightFileIdIndex[subjectHash]:
                     if subject['path'] == potentialTarget['path']:
                         continue
-                    if compareFiles( subject, potentialTarget, args.ignore_modified ):
+                    if compareFiles( subject, potentialTarget, args.ignore_modified, args.contents, leftSources, rightSources, leftContentHashes, rightContentHashes ):
                         if not potentialTarget in subjectPartners:
                             subjectPartners.append( potentialTarget )
                             if args.singles_only and subjectPartners: break
@@ -138,9 +162,30 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
             partners.append( (subject, sorted( subjectPartners, key = lambda s: s['path'].lower() )) )
 
         counter += 1
-        if time.time() - lastOutput > 10:
+        if time.time() - lastOutput > 10: # each 10 sec
             print( '%i/%i...' % (counter, len(subjects)) )
             lastOutput = time.time()
+
+            if (args.hashfile_left or args.hashfile_right) and time.time() - lastSave > 60*30: # each 30 min
+                assert args.contents
+                print( 'saving hashes so far...' )
+                if args.hashfile_left:
+                    with open( args.hashfile_left, 'w' ) as outfile:
+                        json.dump( leftContentHashes, outfile, indent = 4 )
+                if args.hashfile_right:
+                    with open( args.hashfile_right, 'w' ) as outfile:
+                        json.dump( rightContentHashes, outfile, indent = 4 )
+                lastSave = time.time()
+
+    if args.hashfile_left or args.hashfile_right:
+        assert args.contents
+        print( 'saving hashes...' )
+        if args.hashfile_left:
+            with open( args.hashfile_left, 'w' ) as outfile:
+                json.dump( leftContentHashes, outfile, indent = 4 )
+        if args.hashfile_right:
+            with open( args.hashfile_right, 'w' ) as outfile:
+                json.dump( rightContentHashes, outfile, indent = 4 )
 
     printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
 
@@ -243,26 +288,46 @@ def main():
     parser.add_argument( '--singles-only', action = 'store_true' )
     parser.add_argument( '--only', action = 'append', help = 'include paths (exact match); only on directory scans' )
     parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only on directory scans' )
-    parser.add_argument( '--save-left', help = 'only on directory scans' )
-    parser.add_argument( '--save-right', help = 'only on directory scans' )
+    parser.add_argument( '--save-left', help = 'only on directory scans or content searches' )
+    parser.add_argument( '--save-right', help = 'only on directory scans or content comparisons' )
     parser.add_argument( '--exclude', action = 'append', help = 'exclude paths (regex match)' )
     parser.add_argument( '--include', action = 'append', help = 'include paths only (regex match)' )
     parser.add_argument( '--rewrite-left', help = 'rewrite left root directory for comparison' )
     parser.add_argument( '--rewrite-right', help = 'rewrite right root directory for comparison' )
+    parser.add_argument( '--contents', action = 'store_true', help = 'compare contents for potential matches' )
+    parser.add_argument( '--source-left', action = 'append', help = 'left data source for hashing, may be old::new' )
+    parser.add_argument( '--source-right', action = 'append', help = 'right data source for hashing, may be old::new' )
+    parser.add_argument( '--hashfile-left', help = 'only for content comparisons' )
+    parser.add_argument( '--hashfile-right', help = 'only for content comparisons' )
     args = parser.parse_args()
 
-    (leftDirectory, leftIndex, leftCommonRootLen) = libdircmp.scan(
+    if not args.contents and (args.source_left or args.source_right):
+        print( "Error: --source-left and --source-right work only with --contents." )
+        sys.exit( 1 )
+
+    if not args.contents and (args.hashfile_left or args.hashfile_right):
+        print( "Error: --hashfile-left and --hashfile-right work only with --contents." )
+        sys.exit( 1 )
+
+    if args.contents and args.dirs:
+        print( "Error: --contents not supported in --dirs mode." )
+        sys.exit( 1 )
+
+    (leftDirectory, leftIndex, leftCommonRoot) = libdircmp.scan(
         args.left, args.rewrite_left, 'subjects', args.save_left, args
         )
 
-    (rightDirectory, rightIndex, rightCommonRootLen) = libdircmp.scan(
+    (rightDirectory, rightIndex, rightCommonRoot) = libdircmp.scan(
         args.right, args.rewrite_right, 'targets', args.save_right, args
         )
 
+    leftSources = libdircmp.getSources( args.source_left, leftCommonRoot )
+    rightSources = libdircmp.getSources( args.source_right, rightCommonRoot )
+
     if args.dirs:
-        findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
+        findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, len(leftCommonRoot), len(rightCommonRoot), args )
     else:
-        findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
+        findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, len(leftCommonRoot), len(rightCommonRoot), leftSources, rightSources, args )
 
 if __name__ == "__main__":
     main()
