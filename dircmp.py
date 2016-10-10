@@ -125,18 +125,19 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
     counter = 0
     for subject in subjects:
         subjectHashes = hashFileId( subject, args.ignore_modified )
-        found = False
+        subjectPartners = []
         for subjectHash in subjectHashes:
-            if found: break
+            if args.singles_only and subjectPartners: break
             if subjectHash in rightFileIdIndex:
                 for potentialTarget in rightFileIdIndex[subjectHash]:
-                    if found: break
                     if subject['path'] == potentialTarget['path']:
                         continue
                     if compareFiles( subject, potentialTarget, args.ignore_modified ):
-                        partners.append( (subject, potentialTarget) )
-                        found = True
-                        break
+                        if not potentialTarget in subjectPartners:
+                            subjectPartners.append( potentialTarget )
+                            if args.singles_only and subjectPartners: break
+        if subjectPartners:
+            partners.append( (subject, sorted( subjectPartners, key = lambda s: s['path'].lower() )) )
 
         counter += 1
         if time.time() - lastOutput > 10:
@@ -172,10 +173,10 @@ def printPartnersSimple( subjects, partners, leftCommonRootLen, rightCommonRootL
     if not args.partners_only:
         singles = []
         matchedSubjects = set( map( lambda x: x[0]['path'], partners ) )
-        for subject in sorted( subjects, key = lambda s: s['name'].lower() ):
+        for subject in sorted( subjects, key = lambda s: s['name'].lower() ): # TODO: sort by name? why not by path?
             if not subject['path'] in matchedSubjects:
                 singles.append( subject )
-        print( '%i singles (without partner).' % len( singles ) )
+        print( '%i singles (without partners).' % len( singles ) )
         for single in singles:
             print( '%s%s%s has no partner' % (
                 color_red, single['path'][leftCommonRootLen:], color_end,
@@ -213,15 +214,16 @@ def printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftI
     print( '%i partners found.' % len( partners ) )
     if not args.singles_only:
         for partner in partners:
-            print( '%s%s%s has partner %s%s%s' % (
+            targets = map( lambda x: x['path'][rightCommonRootLen:], partner[1] )
+            print( '%s%s%s has partner(s) %s%s%s' % (
                 color_green, partner[0]['path'][leftCommonRootLen:], color_end,
-                color_blue, partner[1]['path'][rightCommonRootLen:], color_end
+                color_blue, ("%s, %s" % (color_end, color_blue)).join( targets ), color_end
                 ) )
 
     if not args.partners_only:
         singles = []
         matchedSubjects = set( map( lambda x: x[0]['path'], partners ) )
-        for subject in sorted( subjects, key = lambda s: s['name'].lower() ):
+        for subject in subjects:
             if not subject['path'] in matchedSubjects:
                 singles.append( subject )
         print( '%i singles (without partner).' % len( singles ) )
