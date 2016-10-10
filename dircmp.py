@@ -71,15 +71,13 @@ def compareDirectories( a, b, ignoreModified ):
 
     return True
 
-def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, exclude, include, args ):
+def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args ):
     print( 'searching directory partners...' )
     lastOutput = time.time()
 
     subjects = []
     for leftFile in leftDirectory:
         leftFileId = leftDirectory[leftFile]
-        if not checkFilter( exclude, include, leftFileId['path'] ):
-            continue
         if leftFileId['isDir'] and leftFileId['children']:
             subjects.append( leftFileId )
 
@@ -102,7 +100,7 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
 
     printPartnersSimple( subjects, partners, leftCommonRootLen, rightCommonRootLen, args )
 
-def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, exclude, include, args ):
+def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args ):
     print( 'indexing targets...' )
     rightFileIdIndex = {}
     for rightPath in rightIndex:
@@ -147,9 +145,12 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
 
     printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
 
-def checkFilter( exclude, include, path ):
+def checkIncludeFilter( include, path ):
     if include and sum(1 for regex in include if regex.search( path )) == 0:
         return False
+    return True
+
+def checkExcludeFilter( exclude, path ):
     if sum(1 for regex in exclude if regex.search( path )) > 0:
         return False
     return True
@@ -249,12 +250,16 @@ def filterDirectory( include, exclude, directory ):
     newDirectory = {}
     for name in directory:
         fileId = directory[name]
-        if not checkFilter( exclude, include, fileId['path'] ):
+        if not checkExcludeFilter( exclude, fileId['path'] ):
+            continue
+        includeThis = checkIncludeFilter( include, fileId['path'] )
+        children = filterDirectory( include, exclude, fileId['children'] )
+        if not includeThis and not children:
             continue
         newDirectory[name] = {}
         for key in fileId:
             if key == 'children':
-                newDirectory[name][key] = filterDirectory( include, exclude, fileId[key] )
+                newDirectory[name][key] = children
             else:
                 newDirectory[name][key] = fileId[key]
     return newDirectory
@@ -344,9 +349,9 @@ def main():
         )
 
     if args.mode == 'dirs':
-        findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, exclude, include, args )
+        findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
     elif args.mode == 'files':
-        findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, exclude, include, args )
+        findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
 
 if __name__ == "__main__":
     main()
