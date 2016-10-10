@@ -1,14 +1,9 @@
 #!/usr/bin/env python
 
-import dircmp_scan
-import dircmp_info
-import os
+import libdircmp
 import time
 import argparse
-import json
-import re
 import enum
-import sys
 import cPickle as pickle
 import hashlib
 
@@ -22,12 +17,12 @@ def hashFileId( fileId, ignoreModified ):
     if ignoreModified:
         return [hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size']) ) ).hexdigest()]
     else:
-        # +- 10 seconds
-        timestampBy10 = int(fileId['modified']/100.0)
+        # +- 100 seconds
+        timestamp = int(fileId['modified']/100.0)
         return [
-            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10-1) ) ).hexdigest(),
-            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10+0) ) ).hexdigest(),
-            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestampBy10+1) ) ).hexdigest()
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestamp-1) ) ).hexdigest(),
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestamp+0) ) ).hexdigest(),
+            hashlib.sha1( pickle.dumps( (fileId['isDir'], fileId['size'], timestamp+1) ) ).hexdigest()
             ]
 
 def compareFiles( a, b, ignoreModified ):
@@ -95,7 +90,7 @@ def findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftC
             if rightFileId['isDir']:
                 if compareDirectories( subject, rightFileId, args.ignore_modified ):
                     partners.append( (subject, rightFileId) )
-                    
+
         counter += 1
         if time.time() - lastOutput > 10:
             print( '%i/%i...' % (counter, len(subjects)) )
@@ -148,16 +143,6 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
             lastOutput = time.time()
 
     printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
-
-def checkIncludeFilter( include, path ):
-    if include and sum(1 for regex in include if regex.search( path )) == 0:
-        return False
-    return True
-
-def checkExcludeFilter( exclude, path ):
-    if sum(1 for regex in exclude if regex.search( path )) > 0:
-        return False
-    return True
 
 def printPartnersSimple( subjects, partners, leftCommonRootLen, rightCommonRootLen, args ):
     color_green = '\033[92m'
@@ -245,126 +230,38 @@ def printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftI
                 color_red,
                 single['path'][leftCommonRootLen:] + ('/' if single['isDir'] else ''),
                 color_end,
-                dircmp_info.formatMemory( single['size'] )
+                libdircmp.formatMemory( single['size'] )
                 ) )
-
-def rewritePaths( directory, oldRootLen, newRoot ):
-    for filename in directory:
-        fileId = directory[filename]
-        fileId['path'] = newRoot + fileId['path'][oldRootLen:]
-        rewritePaths( fileId['children'], oldRootLen, newRoot )
-
-def filterDirectory( include, exclude, directory ):
-    newDirectory = {}
-    for name in directory:
-        fileId = directory[name]
-        if not checkExcludeFilter( exclude, fileId['path'] ):
-            continue
-        includeThis = checkIncludeFilter( include, fileId['path'] )
-        children = filterDirectory( include, exclude, fileId['children'] )
-        if not includeThis and not children:
-            continue
-        newDirectory[name] = {}
-        for key in fileId:
-            if key == 'children':
-                newDirectory[name][key] = children
-            else:
-                newDirectory[name][key] = fileId[key]
-    return newDirectory
-
-def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exclude, args ):
-    root = os.path.abspath( rootGiven.replace( '\\', '/' ) )
-    if rewriteRoot:
-        rootRewritten = os.path.abspath( rewriteRoot.replace( '\\', '/' ) )
-
-    if os.path.isdir( root ):
-        print( "scanning %s..." % name )
-        directory = dircmp_scan.scanIntoMemory( root, onlyScan, skipScan )
-        with open( saveAs, 'w' ) as outfile:
-            json.dump( directory, outfile, indent = 4 )
-    elif os.path.isfile( root ):
-        print( "loading %s..." % name )
-        with open( root, 'r' ) as infile:
-            directory = json.load( infile )
-    else:
-        print( "Error: %s does not exist." % root )
-        sys.exit( 1 )
-
-    if exclude or include:
-        print( 'filtering data...' )
-        directory = filterDirectory( include, exclude, directory )
-        if not directory:
-            print( "Error: root filtered out." )
-            sys.exit( 1 )
-
-    print( 'calculating directory sizes...' )
-    dircmp_info.calculateDirectorySizes( directory )
-
-    if rewriteRoot:
-        firstEntry = directory[list(directory.keys())[0]]
-        commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
-
-        rewritePaths( directory, commonRootLen-1, rootRewritten )
-
-    firstEntry = directory[list(directory.keys())[0]]
-    commonRootLen = len( firstEntry['path'] ) - len( firstEntry['name'] )
-
-    index = dircmp_info.indexDirectory( directory )
-    dircmp_info.printIndexResult( index )
-
-    print( '%s root: %s' % (name, firstEntry['path'][:commonRootLen-1]) )
-
-    return directory, index, commonRootLen
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument( 'mode', choices=['dirs','files'] )
     parser.add_argument( 'left', help = 'directory or json file' )
     parser.add_argument( 'right', help = 'directory or json file' )
+    parser.add_argument( '--dirs', help = 'only search for top level directories' )
     parser.add_argument( '--ignore-modified', action = 'store_true' )
     parser.add_argument( '--partners-only', action = 'store_true' )
     parser.add_argument( '--singles-only', action = 'store_true' )
-    parser.add_argument( '--only', action = 'append', help = 'include paths (exact match); only affects directory scans' )
-    parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only affects directory scans' )
-    parser.add_argument( '--save-left', default = 'subjects.json', help = 'default: %(default)s; only affects directory scans' )
-    parser.add_argument( '--save-right', default = 'targets.json', help = 'default: %(default)s; only affects directory scans' )
+    parser.add_argument( '--only', action = 'append', help = 'include paths (exact match); only on directory scans' )
+    parser.add_argument( '--skip', action = 'append', help = 'exclude paths (exact match); only on directory scans' )
+    parser.add_argument( '--save-left', help = 'only on directory scans' )
+    parser.add_argument( '--save-right', help = 'only on directory scans' )
     parser.add_argument( '--exclude', action = 'append', help = 'exclude paths (regex match)' )
     parser.add_argument( '--include', action = 'append', help = 'include paths only (regex match)' )
     parser.add_argument( '--rewrite-left', help = 'rewrite left root directory for comparison' )
     parser.add_argument( '--rewrite-right', help = 'rewrite right root directory for comparison' )
     args = parser.parse_args()
 
-    if args.only:
-        onlyScan = set( map( lambda x: os.path.abspath( x.replace( '\\', '/' ) ), args.only ) )
-    else:
-        onlyScan = set()
-
-    if args.skip:
-        skipScan = set( map( lambda x: os.path.abspath( x.replace( '\\', '/' ) ), args.skip ) )
-    else:
-        skipScan = set()
-
-    if args.exclude:
-        exclude = map( lambda pattern: re.compile( pattern ), args.exclude )
-    else:
-        exclude = []
-
-    if args.include:
-        include = map( lambda pattern: re.compile( pattern ), args.include )
-    else:
-        include = []
-
-    (leftDirectory, leftIndex, leftCommonRootLen) = scan( 
-        args.left, args.rewrite_left, 'subjects', args.save_left, onlyScan, skipScan, include, exclude, args
+    (leftDirectory, leftIndex, leftCommonRootLen) = libdircmp.scan(
+        args.left, args.rewrite_left, 'subjects', args.save_left, args
         )
 
-    (rightDirectory, rightIndex, rightCommonRootLen) = scan( 
-        args.right, args.rewrite_right, 'targets', args.save_right, onlyScan, skipScan, include, exclude, args
+    (rightDirectory, rightIndex, rightCommonRootLen) = libdircmp.scan(
+        args.right, args.rewrite_right, 'targets', args.save_right, args
         )
 
-    if args.mode == 'dirs':
+    if args.dirs:
         findDirectories( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
-    elif args.mode == 'files':
+    else:
         findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
 
 if __name__ == "__main__":
