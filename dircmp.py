@@ -49,6 +49,9 @@ def haveSameItems( list1, list2, id = lambda x: x ):
     return not (set1 ^ set2)
 
 def compareDirectories( a, b, ignoreModified ):
+    if a['size'] != b['size']:
+        return False
+
     aChildren = a['children']
     bChildren = b['children']
 
@@ -238,8 +241,11 @@ def printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftI
         singles = []
         appendTaggedItems( singles, leftDirectory, 'single' )
         for single in singles:
-            print( '%s%s%s has no partner' % (
-                color_red, single['path'][leftCommonRootLen:] + ('/' if single['isDir'] else ''), color_end,
+            print( '%s%s%s (%s) has no partner' % (
+                color_red,
+                single['path'][leftCommonRootLen:] + ('/' if single['isDir'] else ''),
+                color_end,
+                dircmp_info.formatMemory( single['size'] )
                 ) )
 
 def rewritePaths( directory, oldRootLen, newRoot ):
@@ -276,10 +282,13 @@ def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exc
         directory = dircmp_scan.scanIntoMemory( root, onlyScan, skipScan )
         with open( saveAs, 'w' ) as outfile:
             json.dump( directory, outfile, indent = 4 )
-    else:
+    elif os.path.isfile( root ):
         print( "loading %s..." % name )
         with open( root, 'r' ) as infile:
             directory = json.load( infile )
+    else:
+        print( "Error: %s does not exist." % root )
+        sys.exit( 1 )
 
     if exclude or include:
         print( 'filtering data...' )
@@ -287,6 +296,9 @@ def scan( rootGiven, rewriteRoot, name, saveAs, onlyScan, skipScan, include, exc
         if not directory:
             print( "Error: root filtered out." )
             sys.exit( 1 )
+
+    print( 'calculating directory sizes...' )
+    dircmp_info.calculateDirectorySizes( directory )
 
     if rewriteRoot:
         firstEntry = directory[list(directory.keys())[0]]

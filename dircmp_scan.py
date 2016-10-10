@@ -9,14 +9,24 @@ import sys
 
 def getFileId( root, filename ):
     path = os.path.join( root, filename )
-    info = os.stat( path )
+    try:
+        info = os.stat( path )
+    except OSError:
+        print( 'Could not access %s' % path )
+        return {
+            'name' : filename,
+            'path' : path,
+            'isDir' : False,
+            'modified' : 0,
+            'size' : 0
+            }
     return {
         'name' : filename,
         'path' : path,
         'isDir' : stat.S_ISDIR( info.st_mode ),
         'modified' : info.st_mtime,
         'size' : info.st_size
-    }
+        }
 
 def isIncluded( fileId, includes ):
     if fileId['path'] in includes:
