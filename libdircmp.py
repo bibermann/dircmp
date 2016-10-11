@@ -123,13 +123,17 @@ def hashFileContents( fileId, sources, contentHashes ):
             if path[:len(old)] == old:
                 path = new + path[len(old):]
                 break
-        with open( path, 'rb' ) as f:
-            blocksize = 1024*1024*10
-            buf = f.read( blocksize )
-            while len( buf ) > 0:
-                hasher.update( buf )
+        try:
+            with open( path, 'rb' ) as f:
+                blocksize = 1024*1024*10
                 buf = f.read( blocksize )
-        contentHashes[oriPath] = hasher.hexdigest()
+                while len( buf ) > 0:
+                    hasher.update( buf )
+                    buf = f.read( blocksize )
+            contentHashes[oriPath] = hasher.hexdigest()
+        except IOError:
+            print( 'Could not read %s' % path )
+            contentHashes[oriPath] = '0'
 
 def isIncluded( fileId, includes ):
     if fileId['path'] in includes:

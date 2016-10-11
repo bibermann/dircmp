@@ -88,7 +88,12 @@ def hashAllFileContents( index, filename, sources ):
     lastSave = time.time()
     totalFileCount = sum( not index[path]['isDir'] for path in index )
     counter = 0
+    
     contentHashes = {}
+    print( 'loading hashes...' )
+    with open( filename, 'r' ) as infile:
+        contentHashes = json.load( infile )
+
     for path in index:
         fileId = index[path]
         if not fileId['isDir']:
