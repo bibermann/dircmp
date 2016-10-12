@@ -82,13 +82,16 @@ def find( pattern, directory, index, commonRootLen, args ):
     if size_all != size_files:
         print( "files only: %s%s%s" % (color_red, libdircmp.formatMemory( size_files ), color_end) )
 
-def hashAllFileContents( index, filename, sources ):
+def hashAllFileContents( index, directory, filename, sources ):
     print( 'hashing file contents...' )
     lastOutput = time.time()
     lastSave = time.time()
     totalFileCount = sum( not index[path]['isDir'] for path in index )
+    totalFileSize = sum( directory[name]['size'] for name in directory )
+    totalFileSizeString = libdircmp.formatMemory( totalFileSize )
     counter = 0
-    
+    sizeCounter = 0
+
     contentHashes = {}
     print( 'loading hashes...' )
     with open( filename, 'r' ) as infile:
@@ -98,10 +101,11 @@ def hashAllFileContents( index, filename, sources ):
         fileId = index[path]
         if not fileId['isDir']:
             libdircmp.hashFileContents( fileId, sources, contentHashes )
+            counter += 1
+            sizeCounter += fileId['size']
 
-        counter += 1
         if time.time() - lastOutput > 10: # each 10 sec
-            print( '%i/%i...' % (counter, totalFileCount) )
+            print( '%i/%i (%s/%s)...' % (counter, totalFileCount, libdircmp.formatMemory( sizeCounter ), totalFileSizeString) )
             lastOutput = time.time()
 
             if time.time() - lastSave > 60*30: # each 30 min
@@ -143,7 +147,7 @@ def main():
         find( args.find, directory, index, len(commonRoot), args )
     elif args.hash:
         sources = libdircmp.getSources( args.source, commonRoot )
-        hashAllFileContents( index, args.hash, sources )
+        hashAllFileContents( index, directory, args.hash, sources )
 
 if __name__ == "__main__":
     main()
