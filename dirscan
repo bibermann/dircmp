@@ -61,7 +61,7 @@ def find( pattern, directory, index, commonRootLen, args ):
         if index < len(path): text += path[index:]
         if fileId['isDir']: text += '/'
         text += color_end
-        print( '%s (%s)' % (text, libdircmp.formatMemory( fileId['size'] )) )
+        print( '%s (%s)' % (text, libdircmp.formatBytes( fileId['size'] )) )
     print( "%s%i%s results found (%i files, %i directories)." % (color_red, len(findings), color_end, len(findings)-len(directoriesFound), len(directoriesFound)) )
     print( "calculating size..." )
     size_all = 0
@@ -78,45 +78,57 @@ def find( pattern, directory, index, commonRootLen, args ):
             size_files += fileId['size']
         if not alreadyIncluded:
             size_all += fileId['size']
-    print( "total size: %s%s%s" % (color_red, libdircmp.formatMemory( size_all ), color_end) )
+    print( "total size: %s%s%s" % (color_red, libdircmp.formatBytes( size_all ), color_end) )
     if size_all != size_files:
-        print( "files only: %s%s%s" % (color_red, libdircmp.formatMemory( size_files ), color_end) )
+        print( "files only: %s%s%s" % (color_red, libdircmp.formatBytes( size_files ), color_end) )
 
 def hashAllFileContents( index, directory, filename, sources ):
     print( 'hashing file contents...' )
     lastOutput = time.time()
     lastSave = time.time()
+    lastCount = 0
+    lastBytes = 0
     totalFileCount = sum( not index[path]['isDir'] for path in index )
     totalFileSize = sum( directory[name]['size'] for name in directory )
-    totalFileSizeString = libdircmp.formatMemory( totalFileSize )
-    counter = 0
-    sizeCounter = 0
+    totalFileSizeString = libdircmp.formatBytes( totalFileSize )
+    itemCounter = 0
+    byteCounter = 0
 
     contentHashes = {}
-    print( 'loading hashes...' )
-    with open( filename, 'r' ) as infile:
-        contentHashes = json.load( infile )
+    print( 'loading hashes from %s...' % filename )
+    contentHashes = json.load( open( filename, 'r' ) )
 
     for path in index:
         fileId = index[path]
         if not fileId['isDir']:
             libdircmp.hashFileContents( fileId, sources, contentHashes )
-            counter += 1
-            sizeCounter += fileId['size']
+            itemCounter += 1
+            byteCounter += fileId['size']
 
-        if time.time() - lastOutput > 10: # each 10 sec
-            print( '%i/%i (%s/%s)...' % (counter, totalFileCount, libdircmp.formatMemory( sizeCounter ), totalFileSizeString) )
+        timeElapsed = time.time() - lastOutput
+        if timeElapsed > 10: # each 10 sec
+            itemSpeed = (itemCounter - lastCount)/timeElapsed
+            byteSpeed = (byteCounter - lastBytes)/timeElapsed
+            etaByItems = (totalFileCount - itemCounter)/itemSpeed if itemSpeed != 0.0 else 0.0
+            etaByBytes = (totalFileSize - byteCounter)/byteSpeed if byteSpeed != 0.0 else 0.0
+            print( '%i/%i, %.2f/s, ETA %s (%s/%s, %s/s, ETA %s)...' % (
+                itemCounter, totalFileCount,
+                itemSpeed, libdircmp.formatSeconds( etaByItems ),
+                libdircmp.formatBytes( byteCounter ), totalFileSizeString,
+                libdircmp.formatBytes( byteSpeed ), libdircmp.formatSeconds( etaByBytes )
+                ) )
             lastOutput = time.time()
+            lastCount = itemCounter
+            lastBytes = byteCounter
 
             if time.time() - lastSave > 60*30: # each 30 min
-                print( 'saving hashes so far...' )
-                with open( filename, 'w' ) as outfile:
-                    json.dump( contentHashes, outfile, indent = 4 )
+                print( 'saving hashes so far to %s...' % filename )
+                json.dump( contentHashes, open( filename, 'w' ), indent = 4 )
+                print( 'hashes saved. going on...' )
                 lastSave = time.time()
 
-    print( 'saving hashes...' )
-    with open( filename, 'w' ) as outfile:
-        json.dump( contentHashes, outfile, indent = 4 )
+    print( 'saving hashes to %s...' % filename )
+    json.dump( contentHashes, open( filename, 'w' ), indent = 4 )
 
 def main():
     parser = argparse.ArgumentParser()

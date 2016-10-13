@@ -115,12 +115,10 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
     rightContentHashes = {}
     if args.hashfile_left and os.path.isfile( args.hashfile_left ):
         print( 'loading subject hashes...' )
-        with open( args.hashfile_left, 'r' ) as infile:
-            leftContentHashes = json.load( infile )
+        leftContentHashes = json.load( open( args.hashfile_left, 'r' ) )
     if args.hashfile_right and os.path.isfile( args.hashfile_right ):
         print( 'loading target hashes...' )
-        with open( args.hashfile_right, 'r' ) as infile:
-            rightContentHashes = json.load( infile )
+        rightContentHashes = json.load( open( args.hashfile_right, 'r' ) )
 
     print( 'indexing targets...' )
     rightFileIdIndex = {}
@@ -170,22 +168,18 @@ def findFiles( leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonR
                 assert args.contents
                 print( 'saving hashes so far...' )
                 if args.hashfile_left:
-                    with open( args.hashfile_left, 'w' ) as outfile:
-                        json.dump( leftContentHashes, outfile, indent = 4 )
+                    json.dump( leftContentHashes, open( args.hashfile_left, 'w' ), indent = 4 )
                 if args.hashfile_right:
-                    with open( args.hashfile_right, 'w' ) as outfile:
-                        json.dump( rightContentHashes, outfile, indent = 4 )
+                    json.dump( rightContentHashes, open( args.hashfile_right, 'w' ), indent = 4 )
                 lastSave = time.time()
 
     if args.hashfile_left or args.hashfile_right:
         assert args.contents
         print( 'saving hashes...' )
         if args.hashfile_left:
-            with open( args.hashfile_left, 'w' ) as outfile:
-                json.dump( leftContentHashes, outfile, indent = 4 )
+            json.dump( leftContentHashes, open( args.hashfile_left, 'w' ), indent = 4 )
         if args.hashfile_right:
-            with open( args.hashfile_right, 'w' ) as outfile:
-                json.dump( rightContentHashes, outfile, indent = 4 )
+            json.dump( rightContentHashes, open( args.hashfile_right, 'w' ), indent = 4 )
 
     printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftIndex, rightIndex, leftCommonRootLen, rightCommonRootLen, args )
 
@@ -275,7 +269,7 @@ def printPartnersGroup( subjects, partners, leftDirectory, rightDirectory, leftI
                 color_red,
                 single['path'][leftCommonRootLen:] + ('/' if single['isDir'] else ''),
                 color_end,
-                libdircmp.formatMemory( single['size'] )
+                libdircmp.formatBytes( single['size'] )
                 ) )
 
 def main():

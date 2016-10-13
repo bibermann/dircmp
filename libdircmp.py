@@ -44,19 +44,30 @@ def indexDirectory( directory ):
 def printIndexResult( index ):
     print( '%i files (%s) and %i folders (%i non-empty) found.' % (
         sum( not index[s]['isDir'] for s in index ),
-        formatMemory( sum( (index[s]['size'] if not index[s]['isDir'] else 0) for s in index ) ),
+        formatBytes( sum( (index[s]['size'] if not index[s]['isDir'] else 0) for s in index ) ),
         sum( index[s]['isDir'] for s in index ),
         sum( index[s]['isDir'] and bool( index[s]['children'] ) for s in index ),
     ) )
 
-def formatMemory( bytes ):
-    units = [ 'Byte', 'KiB', 'MiB', 'GiB', 'TiB' ]
-    iUnit = 0
-    memory = bytes
-    while memory >= 1024.0 and iUnit + 1 < len( units ):
-        memory /= 1024.0
-        iUnit += 1
-    return ('%.0f %s' if iUnit == 0 else '%.2f %s') % (memory, units[iUnit])
+def formatBytes( bytes ):
+    units = [ 'Byte', 'kB', 'MB', 'GB', 'TB' ]
+    i = 0
+    n = bytes
+    while i + 1 < len( units ) and n >= 1024.0:
+        n /= 1024.0
+        i += 1
+    return ('%.0f %s' if i == 0 else '%.2f %s') % (n, units[i])
+
+def formatSeconds( seconds ):
+    units = [ 's', 'min', 'h', 'd', 'years' ]
+    factors = [ 60.0, 60.0, 24.0, 365.25 ]
+    assert( len(units) == len(factors)+1 )
+    i = 0
+    n = seconds
+    while i < len( factors ) and n >= factors[i]:
+        n /= factors[i]
+        i += 1
+    return '%.2f %s' % (n, units[i])
 
 def checkIncludeFilter( include, path ):
     if include and sum(1 for regex in include if regex.search( path )) == 0:
@@ -206,12 +217,11 @@ def scan( rootGiven, rewriteRoot, name, saveAs, args ):
         print( "scanning %s..." % (name if name else root) )
         directory = scanIntoMemory( root, onlyScan, skipScan )
         if saveAs:
-            with open( saveAs, 'w' ) as outfile:
-                json.dump( directory, outfile, indent = 4 )
+            print( "saving to %s..." % saveAs )
+            json.dump( directory, open( saveAs, 'w' ), indent = 4 )
     elif os.path.isfile( root ):
         print( "loading %s..." % (name if name else root) )
-        with open( root, 'r' ) as infile:
-            directory = json.load( infile )
+        directory = json.load( open( root, 'r' ) )
     else:
         print( "Error: %s does not exist." % root )
         sys.exit( 1 )
