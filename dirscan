@@ -6,6 +6,7 @@ import re
 import time
 import sys
 import json
+import os
 
 def find( pattern, directory, index, commonRootLen, args ):
     color_green = '\033[92m'
@@ -95,8 +96,9 @@ def hashAllFileContents( index, directory, filename, sources ):
     byteCounter = 0
 
     contentHashes = {}
-    print( 'loading hashes from %s...' % filename )
-    contentHashes = json.load( open( filename, 'r' ) )
+    if os.path.isfile( filename ):
+        print( 'loading hashes from %s...' % filename )
+        contentHashes = json.load( open( filename, 'r' ) )
 
     for path in index:
         fileId = index[path]
